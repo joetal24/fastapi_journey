@@ -1,0 +1,19 @@
+[project]
+name = "supabase"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "email-validator>=2.3.0",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.24",
+]
+
+[dependency-groups]
+dev = [
+    "supabase",
+]
+
+[tool.uv.sources]
+supabase = { workspace = true }
