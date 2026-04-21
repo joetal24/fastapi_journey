@@ -36,9 +36,3 @@ I'm open to hearing your feedback about the template and what you'd like to see 
 
 Cheers!
 
-
-
-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
-
-export OPENAI_API_KEY="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"
-export OPENAI_BASE_URL="https://openrouter.ai/api/v1"
