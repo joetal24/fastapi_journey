@@ -35,3 +35,7 @@ I'm open to hearing your feedback about the template and what you'd like to see 
 
 
 Cheers!
+<<<<<<< HEAD
+=======
+
+>>>>>>> 10f524859262aba50b124e17b7c977511b33a617
