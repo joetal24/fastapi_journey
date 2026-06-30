@@ -42,15 +42,24 @@ async def create_product(name: str, price: float, description: str = None):
         await conn.close() # close
 
 @app.get("/products")
-async def list_products():
+async def list_products(q: str = None):
     conn = await db()
     try:
-        rows = await conn.fetch("""
-            SELECT p.id, p.name, p.price, s.quantity
-            FROM products p
-            LEFT JOIN stock s ON s.product_id = p.id
-            ORDER BY p.id
-        """)
+        if q:
+            rows = await conn.fetch("""
+                SELECT p.id, p.name, p.price, s.quantity
+                FROM products p
+                LEFT JOIN stock s ON s.product_id = p.id
+                WHERE p.name ILIKE $1
+                ORDER BY p.id
+            """, f"%{q}%")
+        else:
+            rows = await conn.fetch("""
+                SELECT p.id, p.name, p.price, s.quantity
+                FROM products p
+                LEFT JOIN stock s ON s.product_id = p.id
+                ORDER BY p.id
+            """)
         return [dict(r) for r in rows]
     finally:
         await conn.close()
