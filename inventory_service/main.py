@@ -108,24 +108,25 @@ async def create_product(body: ProductCreate, user: str = Depends(get_current_us
         await conn.close()
 
 @app.get("/products")
-async def list_products(q: str = None):
+async def list_products(q: str = None, limit: int = Query(10, ge=1, le=100),
+                        offset: int = Query(0, ge=0)):
     conn = await db()
     try:
+        where = ""
+        params = []
         if q:
-            rows = await conn.fetch("""
-                SELECT p.id, p.name, p.price, s.quantity
-                FROM products p
-                LEFT JOIN stock s ON s.product_id = p.id
-                WHERE p.name ILIKE $1
-                ORDER BY p.id
-            """, f"%{q}%")
-        else:
-            rows = await conn.fetch("""
-                SELECT p.id, p.name, p.price, s.quantity
-                FROM products p
-                LEFT JOIN stock s ON s.product_id = p.id
-                ORDER BY p.id
-            """)
+            where = " WHERE p.name ILIKE $1"
+            params.append(f"%{q}%")
+        query = f"""
+            SELECT p.id, p.name, p.price, s.quantity
+            FROM products p
+            LEFT JOIN stock s ON s.product_id = p.id
+            {where}
+            ORDER BY p.id
+            LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+        """
+        params += [limit, offset]
+        rows = await conn.fetch(query, *params)
         return [dict(r) for r in rows]
     finally:
         await conn.close()
