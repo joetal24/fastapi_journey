@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi import FastAPI, HTTPException, status, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 import asyncpg
 import os
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
+from typing import Optional
 
 app = FastAPI(title="Inventory Service")
 security = HTTPBearer()
@@ -12,6 +14,20 @@ security = HTTPBearer()
 DSN = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5433/inventory")
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGO = "HS256"
+
+class ProductCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    price: float = Field(..., gt=0)
+    description: Optional[str] = None
+
+class ProductResponse(BaseModel):
+    id: int
+    name: str
+    price: float
+    quantity: int
+
+class StockUpdate(BaseModel):
+    quantity: int = Field(..., ge=0)
 
 async def db():
     return await asyncpg.connect(DSN)
@@ -79,16 +95,15 @@ async def login(username: str, password: str):
         await conn.close()
 
 @app.post("/products", status_code=status.HTTP_201_CREATED)
-async def create_product(name: str, price: float, description: str = None,
-                         user: str = Depends(get_current_user)):
+async def create_product(body: ProductCreate, user: str = Depends(get_current_user)):
     conn = await db()
     try:
         pid = await conn.fetchval(
             "INSERT INTO products (name, description, price) VALUES ($1, $2, $3) RETURNING id",
-            name, description, price
+            body.name, body.description, body.price
         )
         await conn.execute("INSERT INTO stock (product_id, quantity) VALUES ($1, 0)", pid)
-        return {"id": pid, "name": name, "price": price}
+        return {"id": pid, "name": body.name, "price": body.price}
     finally:
         await conn.close()
 
