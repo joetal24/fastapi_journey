@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 import asyncpg
 import os
 
@@ -28,7 +28,7 @@ async def startup():
     """)
     await conn.close()
 
-@app.post("/products")
+@app.post("/products", status_code=status.HTTP_201_CREATED)
 async def create_product(name: str, price: float, description: str = None):
     conn = await db() #Open
     try:
