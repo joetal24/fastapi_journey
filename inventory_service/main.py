@@ -1,18 +1,41 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import asyncpg
 import os
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
 
 app = FastAPI(title="Inventory Service")
+security = HTTPBearer()
 
 DSN = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5433/inventory")
+JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
+JWT_ALGO = "HS256"
 
 async def db():
     return await asyncpg.connect(DSN)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+        return payload["sub"]
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="invalid token")
 
 @app.on_event("startup")
 async def startup():
     conn = await db()
     await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id        SERIAL PRIMARY KEY,
+            username  VARCHAR(50) UNIQUE NOT NULL,
+            password  VARCHAR(200) NOT NULL,
+            role      VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+            created_at TIMESTAMP DEFAULT NOW()
+        );
         CREATE TABLE IF NOT EXISTS products (
             id          SERIAL PRIMARY KEY,
             name        VARCHAR(200) NOT NULL,
@@ -28,9 +51,37 @@ async def startup():
     """)
     await conn.close()
 
+@app.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(username: str, password: str):
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    conn = await db()
+    try:
+        await conn.execute("INSERT INTO users (username, password) VALUES ($1, $2)", username, hashed)
+        return {"username": username}
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status_code=409, detail="username already exists")
+    finally:
+        await conn.close()
+
+@app.post("/login")
+async def login(username: str, password: str):
+    conn = await db()
+    try:
+        row = await conn.fetchrow("SELECT * FROM users WHERE username = $1", username)
+        if not row or not bcrypt.checkpw(password.encode(), row["password"].encode()):
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        token = jwt.encode(
+            {"sub": username, "role": row["role"], "exp": datetime.utcnow() + timedelta(hours=1)},
+            JWT_SECRET, algorithm=JWT_ALGO
+        )
+        return {"access_token": token, "token_type": "bearer"}
+    finally:
+        await conn.close()
+
 @app.post("/products", status_code=status.HTTP_201_CREATED)
-async def create_product(name: str, price: float, description: str = None):
-    conn = await db() #Open
+async def create_product(name: str, price: float, description: str = None,
+                         user: str = Depends(get_current_user)):
+    conn = await db()
     try:
         pid = await conn.fetchval(
             "INSERT INTO products (name, description, price) VALUES ($1, $2, $3) RETURNING id",
@@ -39,7 +90,7 @@ async def create_product(name: str, price: float, description: str = None):
         await conn.execute("INSERT INTO stock (product_id, quantity) VALUES ($1, 0)", pid)
         return {"id": pid, "name": name, "price": price}
     finally:
-        await conn.close() # close
+        await conn.close()
 
 @app.get("/products")
 async def list_products(q: str = None):
@@ -81,7 +132,7 @@ async def get_product(pid: int):
         await conn.close()
 
 @app.put("/products/{pid}/stock")
-async def update_stock(pid: int, quantity: int):
+async def update_stock(pid: int, quantity: int, user: str = Depends(get_current_user)):
     if quantity < 0:
         raise HTTPException(status_code=400, detail="quantity cannot be negative")
     conn = await db()
