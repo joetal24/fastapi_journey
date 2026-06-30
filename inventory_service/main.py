@@ -7,9 +7,22 @@ import bcrypt
 import jwt
 from datetime import datetime, timedelta
 from typing import Optional
+import logging
+import time
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+logger = logging.getLogger("inventory")
 
 app = FastAPI(title="Inventory Service")
 security = HTTPBearer()
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = int((time.time() - start) * 1000)
+    logger.info("%s %s %s %dms", request.method, request.url.path, response.status_code, duration)
+    return response
 
 DSN = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5433/inventory")
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
