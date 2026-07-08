@@ -6,12 +6,15 @@ import os
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
+import json
 from typing import Optional
 import logging
 import time
+from aiokafka import AIOKafkaProducer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("inventory")
+kafka_producer = None
 
 app = FastAPI(title="Inventory Service")
 security = HTTPBearer()
@@ -79,6 +82,22 @@ async def startup():
         );
     """)
     await conn.close()
+    global kafka_producer
+    try:
+        kafka_producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+        await kafka_producer.start()
+        logger.info("Kafka producer started")
+    except Exception as e:
+        logger.warning("Kafka not available, events will be skipped: %s", e)
+
+@app.on_event("shutdown")
+async def shutdown():
+    if kafka_producer:
+        try:
+            await kafka_producer.stop()
+            logger.info("Kafka producer stopped")
+        except Exception:
+            pass
 
 @app.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(username: str, password: str):
@@ -174,6 +193,9 @@ async def update_stock(pid: int, quantity: int, user: str = Depends(get_current_
             "ON CONFLICT (product_id) DO UPDATE SET quantity = $2",
             pid, quantity
         )
+        if kafka_producer:
+            event = {"product_id": pid, "quantity": quantity, "updated_by": user}
+            await kafka_producer.send("stock-updates", key=str(pid).encode(), value=json.dumps(event).encode())
         return {"product_id": pid, "quantity": quantity}
     finally:
         await conn.close()
